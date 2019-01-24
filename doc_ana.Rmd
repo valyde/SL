@@ -1,0 +1,873 @@
+---
+title: "Perchè Bolzano è più visitata a Gennaio?"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stringr)
+library(tibble)
+library(ggplot2)
+library(maptools)
+library(plotly)
+library(leaflet)
+```
+
+```{r, include= FALSE}
+#Dataset
+dat_istat<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/2000-2018%20per%20tipo%20e%20residenza%20dei%20visitatori.csv",  sep = ";", stringsAsFactors = F)
+dat_gennaio_arr_provenienza<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/gen-16%20arrivi%20e%20presenze%20origine%20clienti.csv", sep = ";", stringsAsFactors = F)
+dat_gennaio_tipoall_provenienza<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/gen-16%20tipologia%20albergo%20origine%20clienti.csv",  sep = ";", stringsAsFactors = F)
+dat_tipoall<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/tipologia%20albergo%20provincia%20bolzano%202016.csv",  sep = ";", stringsAsFactors = F)
+dat_arr_comuni<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/2016%20arrivi%20nei%20comuni.csv",  sep = ";", stringsAsFactors = F)
+dat_perma_media_comuni<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/permanenza%20media%202016%20nei%20comuni.csv",  sep = ";", stringsAsFactors = F)
+dat_comuni_lat_lon<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/Comuni%20lat%20e%20long.csv",  sep = ";", stringsAsFactors = F)
+Provincie <- read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/Provincie%20lat%20e%20long.csv", sep=";", stringsAsFactors = FALSE)
+easy<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/easy.csv")
+intermediate<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/intermediate.csv")
+advance<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/advance.csv")
+```
+
+
+```{r, include=FALSE, warning=FALSE}
+#Pulizia vari dataset
+
+#Pulizia dati istat
+dat_istat<-dat_istat[,-c(1,4,43:16384)]#colonne in più
+
+for(i in 3:40){  #creo nome delle variabili
+  ifelse(dat_istat[1,i]=="", 
+         dat_istat[3,i]<-paste(dat_istat[1,i-1],dat_istat[2,i]),
+         dat_istat[3,i]<-paste(dat_istat[1,i],dat_istat[2,i]))
+}
+dat_istat<-dat_istat[-c(1,2),]
+
+colnames(dat_istat)<-dat_istat[1,] #rinomino variabili
+dat_istat<-dat_istat[-1,] #elimino osservazione con nomi variabili
+
+dat_istat[,1]<-as.factor(dat_istat[,1]) #territorio in factor
+dat_istat[,2]<-as.factor(dat_istat[,2]) #comune in factor
+
+for(i in 3:40){
+  dat_istat[,i]<-as.numeric(dat_istat[,i]) #osservazioni di arrivi e presenze in numeric
+}
+
+#completamento variabile territorio
+dat_istat[1:3,1]<-"Italia"
+for(i in 4:269){
+  if(dat_istat[i,1]==""){
+    dat_istat[i,1]<-dat_istat[i-1,1]
+  }
+}
+
+#elimino dati dal 2000/2007 e il 2018 dato che ci sono solo misurazioni a livello nazionale e non su base provinciale e anche il 2017
+dat_istat<-dat_istat[,-c(3:18, 37:40)]
+
+#elimino regioni
+regioni<-c("Italia","  Piemonte", "  Lombardia","  Sardegna","  Sicilia","  Lombardia","  Toscana","  Marche", "  Molise","  Abruzzo","  Liguria", "  Puglia","  Campania","  Calabria", "  Lazio","  Provincia Autonoma Bolzano / Bozen", "  Provincia Autonoma Trento", "  Trentino Alto Adige / SÃ¼dtirol", "  Veneto", "  Umbria", "  Valle d'Aosta / Vallee d'Aoste", "  Friuli-Venezia Giulia", "  Emilia-Romagna", "  Basilicata")
+regioni<-c(regioni, "    Sud Sardegna") #elimino anche Sud Sardegna, provincia che fino al 2016 non esisteva
+indice_regioni<-0
+k<-1
+for(i in 1:nrow(dat_istat)){
+  for(j in 1:length(regioni)){
+    if((dat_istat$Territorio[i]==regioni[j])){
+      indice_regioni[k]<-i
+      k=k+1
+    }
+  }
+}
+dat_istat<-dat_istat[-indice_regioni,]
+
+#indici utili
+col_arrivi<- c(3,5,7,9,11,13,15,17,19)
+col_presenze<-c(4,6,8,10,12,14,16,18,20)
+
+j<-1
+pari<-0
+for(i in 1:110){
+  pari[j]<-(2*i)
+  j=j+1
+}
+
+j<-1
+dispari<-0
+for(i in 0:109){
+  dispari[j]<-(2*i+1)
+  j=j+1
+}
+
+j<-1
+k<-1
+p<-0
+prov<-0
+for(i in dispari){
+  a<-unlist(str_extract_all(as.character(dat_istat$Territorio[i]), boundary("word")))
+  if(length(a)>1){
+    p<-a[1]
+    for( j in 2:length(a)){
+      p<-paste(p,a[j])
+    }
+  } else {
+    p<-a
+  }
+  prov[k]<-p
+  k=k+1
+}
+
+dat_istat$Territorio<-rep(prov,each=2)
+dat_istat$Territorio<-as.factor(dat_istat$Territorio)
+
+#Creazione dati istat longitudinale
+#Longitudinali Arrivi
+date<-c("2008-01-01", "2009-01-01", "2010-01-01", "2011-01-01", "2012-01-01", "2013-01-01", "2014-01-01", "2015-01-01", "2016-01-01")
+dat_istat_long_arrivi<-data.frame(Provincia=NA, Paese_residenza=NA, Arrivi=NA, Anno=NA)
+r<-1
+j<-1
+k<-1
+
+for(i in pari){
+  dat_istat_long_arrivi[r:(r+26),1]<-rep(as.character(dat_istat[i,1]),27)
+  dat_istat_long_arrivi[r:(r+17),2]<-rep(as.character(dat_istat[1:2,2]), each=9)
+  dat_istat_long_arrivi[(r+18):(r+26),2]<-"Totale"
+  dat_istat_long_arrivi[r:(r+8),3]<-t(dat_istat[j:(j+1),col_arrivi])[1:9]
+  dat_istat_long_arrivi[(r+9):(r+17),3]<-t(dat_istat[j:(j+1),col_arrivi])[10:18]
+  tot<-0
+  l<-1
+  for(k in col_arrivi){
+    tot[l]<-sum(dat_istat[j,k],dat_istat[j+1,k], na.rm=TRUE)
+    l<-l+1
+  }
+  dat_istat_long_arrivi[(r+18):(r+26),3]<-tot
+  dat_istat_long_arrivi[r:(r+26),4]<-rep(date,3)
+  j<-j+2
+  r<-r+27
+}
+
+#Longitudinali Presenze
+dat_istat_long_presenze<-data.frame(Provincia=NA, Paese_residenza=NA, Presenze=NA, Anno=NA)
+r<-1
+j<-1
+k<-1
+
+for(i in pari){
+  dat_istat_long_presenze[r:(r+26),1]<-rep(as.character(dat_istat[i,1]),27)
+  dat_istat_long_presenze[r:(r+17),2]<-rep(as.character(dat_istat[1:2,2]), each=9)
+  dat_istat_long_presenze[(r+18):(r+26),2]<-"Totale"
+  dat_istat_long_presenze[r:(r+8),3]<-t(dat_istat[j:(j+1),col_presenze])[1:9]
+  dat_istat_long_presenze[(r+9):(r+17),3]<-t(dat_istat[j:(j+1),col_presenze])[10:18]
+  tot<-0
+  l<-1
+  for(k in col_presenze){
+    tot[l]<-sum(dat_istat[j,k],dat_istat[j+1,k], na.rm=TRUE)
+    l<-l+1
+  }
+  dat_istat_long_presenze[(r+18):(r+26),3]<-tot
+  dat_istat_long_presenze[r:(r+26),4]<-rep(date,3)
+  j<-j+2
+  r<-r+27
+}
+
+#Dataset provenienza
+j<-1
+nam<-0
+for(i in 2:ncol(dat_gennaio_arr_provenienza)){
+  ifelse(is.na(str_match(names(dat_gennaio_arr_provenienza)[i], ".1")),
+         nam[j]<-paste(names(dat_gennaio_arr_provenienza)[i],dat_gennaio_arr_provenienza[1,i]),
+         nam[j]<-paste(names(dat_gennaio_arr_provenienza)[i-1],dat_gennaio_arr_provenienza[1,i]))
+  j=j+1
+}
+dat_gennaio_arr_provenienza[1, 2:15]<-nam
+colnames(dat_gennaio_arr_provenienza)<-dat_gennaio_arr_provenienza[1,]
+dat_gennaio_arr_provenienza<-dat_gennaio_arr_provenienza[-1,]
+
+dat_gennaio_arr_provenienza[,1]<-as.factor(dat_gennaio_arr_provenienza[,1])
+
+
+for(i in 2:ncol(dat_gennaio_arr_provenienza)){
+  dat_gennaio_arr_provenienza[,i]<-as.numeric(dat_gennaio_arr_provenienza[,i])
+}
+
+#Dataset alloggi
+j<-1
+nam<-0
+for(i in 3:ncol(dat_gennaio_tipoall_provenienza)){
+  ifelse(is.na(str_match(names(dat_gennaio_tipoall_provenienza)[i], ".1")),
+         nam[j]<-paste(names(dat_gennaio_tipoall_provenienza)[i],dat_gennaio_tipoall_provenienza[1,i]),
+         nam[j]<-paste(names(dat_gennaio_tipoall_provenienza)[i-1],dat_gennaio_tipoall_provenienza[1,i]))
+  j=j+1
+}
+dat_gennaio_tipoall_provenienza[1, 3:16]<-nam
+colnames(dat_gennaio_tipoall_provenienza)<-dat_gennaio_tipoall_provenienza[1,]
+dat_gennaio_tipoall_provenienza<-dat_gennaio_tipoall_provenienza[-1,]
+
+dat_gennaio_tipoall_provenienza<-dat_gennaio_tipoall_provenienza[-c(5,10),-1]
+dat_gennaio_tipoall_provenienza[9,1]<-"Totale"
+
+dat_gennaio_tipoall_provenienza[,1]<-as.factor(dat_gennaio_tipoall_provenienza[,1])
+for(i in 2:ncol(dat_gennaio_tipoall_provenienza)){
+  dat_gennaio_tipoall_provenienza[,i]<-as.numeric(dat_gennaio_tipoall_provenienza[,i])
+}
+
+
+#Dataset long arrivi e presenze
+dati_istat_long<-cbind(dat_istat_long_arrivi[,c(1:3)],dat_istat_long_presenze[,c(3,4)])
+
+
+#Codifica variabili e creazione permanenza
+#str(dati_istat_long)
+#dati_istat_long$Anno<-as.numeric(dati_istat_long$Anno)
+dati_istat_long$Permanenza<- dati_istat_long$Presenze/dati_istat_long$Arrivi
+
+
+dati_arrivi<-dati_istat_long[dati_istat_long$Paese_residenza=="Totale",]
+
+dati_arrivi_max<-data.frame(Anno=c(2008:2016), Citta=NA, Arrivo_max=NA)
+ma<-0
+cit<-0
+j<-1
+for(i in date){
+  ma<-max(dati_arrivi$Arrivi[which(dati_arrivi$Anno==i)],na.rm=TRUE)
+  cit<-dati_arrivi$Provincia[which(dati_arrivi$Arrivi==ma)]
+  dati_arrivi_max$Citta[j]<-cit
+  dati_arrivi_max$Arrivo_max[j]<-ma
+  j=j+1
+}
+
+
+#Percentuali arrivi del totale di provincia
+perc<-0
+j<-1
+tot<-sum(dat_istat_long_arrivi$Arrivi[which(dat_istat_long_arrivi$Paese_residenza=="Totale" & dat_istat_long_arrivi$Anno=="2016-01-01")], na.rm=TRUE)
+ind<-which(dat_istat_long_arrivi$Paese_residenza=="Totale" & dat_istat_long_arrivi$Anno=="2016-01-01")
+for(i in ind){
+  perc[j]<-dat_istat_long_arrivi$Arrivi[i]/tot*100
+  j<-j+1
+}
+prov_perc_tot<-data.frame(Provincia=dat_istat$Territorio[pari], Perc_arrivi_tot=perc)
+
+#Lat e long comuni Bolzano
+dat_comuni_lat_lon<-dat_comuni_lat_lon[,1:3]
+dat_comuni_lat_lon[,1]<-as.factor(dat_comuni_lat_lon[,1])
+comuni_bolzano<-cbind(dat_comuni_lat_lon, Permanenza_media=dat_perma_media_comuni$Totale[-which(dat_perma_media_comuni$ï..Comune=="Totale")])
+
+#Lat e long Provincie
+Provincie <- Provincie[,-c(2:6)]
+Provincie[,1]<-as.factor(Provincie$ï..Provincia)
+
+
+mappa<-cbind(dat_istat_long_arrivi[which(dat_istat_long_arrivi$Paese_residenza=="Totale" & dat_istat_long_arrivi$Anno=="2016-01-01"),], Perc_arr_tot=prov_perc_tot[,2])
+
+mappa$soglia<-ifelse(mappa$Perc_arr_tot<1, 0, ifelse (mappa$Perc_arr_tot>1 & mappa$Perc_arr_tot<3, 1, ifelse(mappa$Perc_arr_tot>3 & mappa$Perc_arr_tot<5, 2, ifelse(mappa$Perc_arr_tot>5 & mappa$Perc_arr_tot<9, 3, 4))))
+
+for (i in 1:nrow(mappa)){
+  for (j in 1:nrow(Provincie)){
+    if (mappa$Provincia[i]==Provincie$ï..Provincia[j]){
+      mappa$Latitudine[i]<-Provincie$Latitudine[j]
+      mappa$Longitudine[i]<-Provincie$Longitudine[j]
+    }
+  }
+}
+```
+
+
+##Overview and Motivation
+*Overview and Motivation: Provide an overview of the project goals and the motivation for it*
+
+Il progetto è bastato sulla domanda "Perchè Bolzano è più visitata a Gennaio?", e la risposta a questa domanda è stata trovata tramite un analisi dei dati disponibili sul sito *istat.it*, che comprendono il periodo da Gennaio 2008 a Gennaio 2016. 
+
+
+Si è preso in considerazione il primo mese dell'anno poichè caratterizzato dal particolare clima freddo, e poichè include alcune festività, come Capodanno o l'Epifania, che permettono una migliore organizzazione delle vacanze. 
+
+
+Si è quindi cercata la provincia italiana più visitata in questo mese e analizzando i dati si è capito il motivo di tale attrazione turistica.
+
+
+La motivazione che ci ha spinte a porci questa domanda è stata la curiosità di scoprire quale provincia italiana potesse essere la più visitata in questo mese e perchè, e dato che viaggiare e scoprire nuove attività è una qualità che ci accomuna. (Nn so se è la verità ma mi è uscita così la frase! ahahah) 
+
+
+##Data
+*Data: What is the data/how did you get it?*
+
+Il dataset principale è stato scaricato dalla banca dati dell'*istat.it*, sotto la voce *Servizi/Turismo/Movimento dei clienti negli esercizi ricettivi - dati mensili/Paese di origine* mentre per la successiva parte di analisi, che riguarda la provincia di Bolzano, i dati sono stati scaricati dal sito *astat.provinz.bz.it*, nelle banche dati comunali e nelle tabelle interattive dedicate al turismo.
+
+
+Le osservazioni sul turismo includono:
+
+
++ **numero di arrivi**: il numero di clienti che hanno effettuato il check-in negli esercizi ricettivi (alberghieri o extra-alberghieri) nel periodo considerato;
++ **numero di presenze**: il numero delle notti trascorse dai clienti negli esercizi ricettivi nel periodo considerato;
++ **permanenza media**: esprime la durata media della permanenza dei clienti negli esercizi ricettivi e si calcola mediante il rapporto tra il numero di notti trascorse (presenze) e il numero di clienti arrivati nella struttura ricettiva (arrivi);
++ **Paese di provenienza**: il paese di provenienza dei turisti, che per il dataset originale è diviso in *Italia* e *Paesi Esteri*, mentre per i dataset riguardanti la provincia di Bolzano sono suddivisi in *Italia*, *Germania*, *Svizzera e Liechtenstein*, *Austria*, *Benelux* (Paesi Bassi, Belgio e Lussemburgo) e *Altri Paesi*;
++ **Tipologia alloggio**: suddivisa in *4-5 stelle*, *3 stelle*, *1-2 stelle*, *Residence*, *Campeggi*, *Alloggi privati*, *Esercizi agrituristici* e *Altri esercizi* per gli alloggi della provincia di Bolzano.
+
+
+Inoltre sono state raccolte anche coordinate geografiche che hanno permesso di realizzare le mappe presenti nel blog.
+
+
+##Statistical methods
+*Statistical methods: How did you answer the questions (e.g. what statistical techniques, etc)? It should include text justifying decisions you made (e.g. why did you remove certain observations, etc.)*
+
+
+Per rispondere alla domanda, si è eseguita una pulizia del dataset principale, quindi si sono rimosse osservazioni in eccesso e preso in considerazione il periodo temporale tra Gennaio 2008 e Gennaio 2016, in quanto prima del 2008 le osservazioni riguardavano solamente l'intera Italia e non le singole provincie, e dopo il 2016 si sarebbe persa la comformità delle provicie siccome nel 2017 nasce la provincia Sud Sardegna che è un raggruppamento di diverse provincie prima esistenti. Si sono, inoltre, eliminate le osservazioni riguardanti gli arrivi e le presenze totali delle varie regione.
+
+
+```{r, eval=FALSE}
+#Pulizia dati istat
+dat_istat<-dat_istat[,-c(1,4,43:16384)]#colonne in più
+
+for(i in 3:40){  #creo nome delle variabili
+  ifelse(dat_istat[1,i]=="", 
+         dat_istat[3,i]<-paste(dat_istat[1,i-1],dat_istat[2,i]),
+         dat_istat[3,i]<-paste(dat_istat[1,i],dat_istat[2,i]))
+}
+dat_istat<-dat_istat[-c(1,2),]
+
+colnames(dat_istat)<-dat_istat[1,] #rinomino variabili
+dat_istat<-dat_istat[-1,] #elimino osservazione con nomi variabili
+
+dat_istat[,1]<-as.factor(dat_istat[,1]) #territorio in factor
+dat_istat[,2]<-as.factor(dat_istat[,2]) #comune in factor
+
+for(i in 3:40){
+  dat_istat[,i]<-as.numeric(dat_istat[,i]) #osservazioni di arrivi e presenze in numeric
+}
+
+#completamento variabile territorio
+dat_istat[1:3,1]<-"Italia"
+for(i in 4:269){
+  if(dat_istat[i,1]==""){
+    dat_istat[i,1]<-dat_istat[i-1,1]
+  }
+}
+
+#elimino dati dal 2000/2007 e il 2018 dato che ci sono solo misurazioni a livello nazionale e
+#non su base provinciale e anche il 2017
+dat_istat<-dat_istat[,-c(3:18, 37:40)]
+
+#elimino regioni
+regioni<-c("Italia","  Piemonte", "  Lombardia","  Sardegna","  Sicilia","  Lombardia","  Toscana","  Marche", 
+           "  Molise","  Abruzzo","  Liguria", "  Puglia","  Campania","  Calabria", "  Lazio",
+           "  Provincia Autonoma Bolzano / Bozen", "  Provincia Autonoma Trento", 
+           "  Trentino Alto Adige / SÃ¼dtirol", "  Veneto", "  Umbria", "  Valle d'Aosta / Vallee d'Aoste", 
+           "  Friuli-Venezia Giulia", "  Emilia-Romagna", "  Basilicata")
+regioni<-c(regioni, "    Sud Sardegna") #elimino anche Sud Sardegna, provincia che fino al 2016 non esisteva
+indice_regioni<-0
+k<-1
+for(i in 1:nrow(dat_istat)){
+  for(j in 1:length(regioni)){
+    if((dat_istat$Territorio[i]==regioni[j])){
+      indice_regioni[k]<-i
+      k=k+1
+    }
+  }
+}
+dat_istat<-dat_istat[-indice_regioni,]
+
+#indici utili
+col_arrivi<- c(3,5,7,9,11,13,15,17,19)
+col_presenze<-c(4,6,8,10,12,14,16,18,20)
+
+j<-1
+pari<-0
+for(i in 1:110){
+  pari[j]<-(2*i)
+  j=j+1
+}
+
+j<-1
+dispari<-0
+for(i in 0:109){
+  dispari[j]<-(2*i+1)
+  j=j+1
+}
+
+j<-1
+k<-1
+p<-0
+prov<-0
+for(i in dispari){
+  a<-unlist(str_extract_all(as.character(dat_istat$Territorio[i]), boundary("word")))
+  if(length(a)>1){
+    p<-a[1]
+    for( j in 2:length(a)){
+      p<-paste(p,a[j])
+    }
+  } else {
+    p<-a
+  }
+  prov[k]<-p
+  k=k+1
+}
+
+dat_istat$Territorio<-rep(prov,each=2)
+dat_istat$Territorio<-as.factor(dat_istat$Territorio)
+```
+
+
+Dopo questa prima pulizia si sono creati dei dataset longitudinali che faciliteranno l'analisi esplorativa successiva.
+
+
+```{r, eval=FALSE}
+#Creazione dati istat longitudinale
+#Longitudinali Arrivi
+date<-c("2008-01-01", "2009-01-01", "2010-01-01", "2011-01-01", "2012-01-01", "2013-01-01", "2014-01-01", 
+        "2015-01-01", "2016-01-01")
+dat_istat_long_arrivi<-data.frame(Provincia=NA, Paese_residenza=NA, Arrivi=NA, Anno=NA)
+r<-1
+j<-1
+k<-1
+
+for(i in pari){
+  dat_istat_long_arrivi[r:(r+26),1]<-rep(as.character(dat_istat[i,1]),27)
+  dat_istat_long_arrivi[r:(r+17),2]<-rep(as.character(dat_istat[1:2,2]), each=9)
+  dat_istat_long_arrivi[(r+18):(r+26),2]<-"Totale"
+  dat_istat_long_arrivi[r:(r+8),3]<-t(dat_istat[j:(j+1),col_arrivi])[1:9]
+  dat_istat_long_arrivi[(r+9):(r+17),3]<-t(dat_istat[j:(j+1),col_arrivi])[10:18]
+  tot<-0
+  l<-1
+  for(k in col_arrivi){
+    tot[l]<-sum(dat_istat[j,k],dat_istat[j+1,k], na.rm=TRUE)
+    l<-l+1
+  }
+  dat_istat_long_arrivi[(r+18):(r+26),3]<-tot
+  dat_istat_long_arrivi[r:(r+26),4]<-rep(date,3)
+  j<-j+2
+  r<-r+27
+}
+
+#Longitudinali Presenze
+dat_istat_long_presenze<-data.frame(Provincia=NA, Paese_residenza=NA, Presenze=NA, Anno=NA)
+r<-1
+j<-1
+k<-1
+
+for(i in pari){
+  dat_istat_long_presenze[r:(r+26),1]<-rep(as.character(dat_istat[i,1]),27)
+  dat_istat_long_presenze[r:(r+17),2]<-rep(as.character(dat_istat[1:2,2]), each=9)
+  dat_istat_long_presenze[(r+18):(r+26),2]<-"Totale"
+  dat_istat_long_presenze[r:(r+8),3]<-t(dat_istat[j:(j+1),col_presenze])[1:9]
+  dat_istat_long_presenze[(r+9):(r+17),3]<-t(dat_istat[j:(j+1),col_presenze])[10:18]
+  tot<-0
+  l<-1
+  for(k in col_presenze){
+    tot[l]<-sum(dat_istat[j,k],dat_istat[j+1,k], na.rm=TRUE)
+    l<-l+1
+  }
+  dat_istat_long_presenze[(r+18):(r+26),3]<-tot
+  dat_istat_long_presenze[r:(r+26),4]<-rep(date,3)
+  j<-j+2
+  r<-r+27
+}
+
+#Dataset long arrivi e presenze
+dati_istat_long<-cbind(dat_istat_long_arrivi[,c(1:3)],dat_istat_long_presenze[,c(3,4)])
+```
+
+
+E calcolato la permanenza nelle varie provincie.
+
+
+```{r, eval=FALSE}
+dati_istat_long$Permanenza<- dati_istat_long$Presenze/dati_istat_long$Arrivi
+```
+
+
+L'analisi esplorativa ha inizio con la ricerca della provincia con più arrivi nei diversi anni, si è quindi calcolata sulla base degli arrivi totali senza distinzioni tra italiani e stranieri.
+
+
+```{r, eval=FALSE}
+dati_arrivi<-dati_istat_long[dati_istat_long$Paese_residenza=="Totale",]
+
+dati_arrivi_max<-data.frame(Anno=c(2008:2016), Citta=NA, Arrivo_max=NA)
+ma<-0
+cit<-0
+j<-1
+for(i in date){
+  ma<-max(dati_arrivi$Arrivi[which(dati_arrivi$Anno==i)],na.rm=TRUE)
+  cit<-dati_arrivi$Provincia[which(dati_arrivi$Arrivi==ma)]
+  dati_arrivi_max$Citta[j]<-cit
+  dati_arrivi_max$Arrivo_max[j]<-ma
+  j=j+1
+}
+
+
+#Percentuali arrivi del totale di provincia
+perc<-0
+j<-1
+tot<-sum(dat_istat_long_arrivi$Arrivi[which(dat_istat_long_arrivi$Paese_residenza=="Totale" 
+                                            & dat_istat_long_arrivi$Anno=="2016-01-01")], na.rm=TRUE)
+ind<-which(dat_istat_long_arrivi$Paese_residenza=="Totale" & dat_istat_long_arrivi$Anno=="2016-01-01")
+for(i in ind){
+  perc[j]<-dat_istat_long_arrivi$Arrivi[i]/tot*100
+  j<-j+1
+}
+prov_perc_tot<-data.frame(Provincia=dat_istat$Territorio[pari], Perc_arrivi_tot=perc)
+```
+
+
+E rappresentate tramite il seguente grafico:
+
+
+```{r}
+par(bg="#F8F8FF")
+plot(dati_arrivi_max$Arrivo_max~dati_arrivi_max$Anno, ylim = c(500000,600000), 
+     xlab="anni", ylab="Numero massimo di arrivi", type="b", pch=20, col="green", )
+text(dati_arrivi_max$Anno,dati_arrivi_max$Arrivo_max, dati_arrivi_max$Citta, cex=.8, col="dark green")
+```
+
+
+Dove si nota che la provincia che ha avuto il maggior numero di arrivi è stata Roma, esssendo la capitale italiana, ma in due anni distinti Bolzano risulta esserne superiore in termini di arrivi.
+
+
+Si nota inoltre che Bolzano nel 2016 è la provincia con il maggior numero di arrivi in assoluto negli ultimi 9 anni. Si è quindi rappresentata la distribuzione percentuale degli arrivi in questo anno con la seguente mappa.
+
+
+```{r}
+#mappa italia con provincie gennaio 2016 
+l <- leaflet(height = 750) %>%
+  setView(lat = 42.76698, lng = 12.49382, zoom=6) %>%
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==0)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==0)], 
+                   col="yellow", fillColor = "gray",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==0)], "Percentuale arrivi:",
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==0)],2), "%")) %>% 
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==1)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==1)], 
+                   col="green", fillColor = "lightgreen",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==1)], "Percentuale arrivi:", 
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==1)],2), "%")) %>%
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==2)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==2)], 
+                   col="blue", fillColor = "lightblue",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==2)], "Percentuale arrivi:", 
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==2)],2), "%")) %>%
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==3)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==3)], 
+                   col="orange", fillColor = "lightorange",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==3)], "Percentuale arrivi:", 
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==3)],2), "%")) %>%
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==4)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==4)], 
+                   col="red", fillColor = "orange",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==4)], "Percentuale arrivi:", 
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==4)],2), "%")) %>%
+  addProviderTiles(providers$CartoDB.PositronNoLabels) %>%
+  addLegend(position="topright", colors=c("yellow", "green", "blue", "orange", "red"),
+            labels=c("< 1%", "< 3%", "< 5%", "< 9%", "> 10%"), title="Percentuale arrivi")
+l
+```
+
+
+Essendo Gennaio un mese del periodo invernale si nota una maggiore affluenza degli arrivi nell'Italia Settentrionale. 
+
+
+Il maggior numero di arrivi si concentra nelle provincie con città turistiche, come ad esempio Firenze, Torino e Venezia superate dalle provincie di Milano e di Trento. Tra tutte, le due provincie che spiccano sono Roma e Bolzano, le quali hanno una percentuale di arrivi superiore al 10% ciascuna. In questo anno Bolzano si guadagna la vetta con uno scarto dello 0,3%.
+
+
+Per capire proprio perchè Bolzano superi Roma nel numero di arrivi si è preso in considerazione il dataset rigurdante i dati turistici della provincia di Bolzano.
+
+
+Si è preparato il dataset:
+
+
+```{r}
+#Dataset arrivi nei comuni
+dat_arr_comuni<-dat_arr_comuni[-c(118:nrow(dat_arr_comuni)),-c(10,11)]
+dat_arr_comuni[,1]<-as.factor(dat_arr_comuni[,1])
+for(i in 2:ncol(dat_arr_comuni)){
+  dat_arr_comuni[,i]<-as.numeric(dat_arr_comuni[,i])
+}
+```
+
+ed estratto i primi 5 comuni con il maggior numero di arrivi
+
+```{r}
+max_comuni<-sort(dat_arr_comuni$semestre.invernale, decreasing = T)[2:6]
+k<-1
+oss_max<-0
+for (i in 1:nrow(dat_arr_comuni)){
+  for(j in 1:length(max_comuni)){
+    if(length(which(dat_arr_comuni[i,8]==max_comuni[j]))!=0){
+      oss_max[k]<-i
+      k=k+1
+  }
+  }
+}
+dat_arr_comuni[oss_max, c(1,8,9)]
+```
+
+Il primo comune è Selva di Val Gardena, a seguire Castelrotto, poi Bolzano, Badia, Corvara in Badia.
+
+
+Si nota che il saldo tra estate e inverno dei comuni di Selva di Val Gardena, Badia e Coravara in Badia è negativo, cioè hanno arrivi maggiori nella stagione invernale rispetto a quella estiva ed infatti sono principalmente mete sciistiche.
+
+
+Esse infatti formano il comprensorio dell'Alta Badia, e risultano essere i comuni più visitati della provincia di Bolzano nel periodo invernale, essendoci le più pregiate località sciistiche della Valle.
+
+
+```{r}
+l <- leaflet(height = 750) %>%
+  setView(lat = 46.550925,  lng = 11.828666, zoom=12) %>%
+  addCircleMarkers(lat = comuni_bolzano$Latitudine[which(comuni_bolzano$ï..Comune=="Badia")], 
+                   lng = comuni_bolzano$Longitudine[which(comuni_bolzano$ï..Comune=="Badia")], 
+                   col = "darkblue",  opacity = 0.9, 
+                   popup =
+                     paste(comuni_bolzano$ï..Comune[which(comuni_bolzano$ï..Comune=="Badia")], 
+                               "Permanenza media",
+                               comuni_bolzano$Permanenza_media[which(comuni_bolzano$ï..Comune=="Badia")])) %>%
+  addCircleMarkers(lat = comuni_bolzano$Latitudine[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")], 
+                   lng = comuni_bolzano$Longitudine[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")], 
+                   col = "darkblue",  opacity = 0.9, 
+                   popup =
+                     paste(comuni_bolzano$ï..Comune[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")], 
+                               "Permanenza media",
+                               comuni_bolzano$Permanenza_media[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")])) %>%
+  addCircleMarkers(lat = comuni_bolzano$Latitudine[which(comuni_bolzano$ï..Comune=="Corvara in Badia")], 
+                   lng = comuni_bolzano$Longitudine[which(comuni_bolzano$ï..Comune=="Corvara in Badia")], 
+                   col = "darkblue",  opacity = 0.9, 
+                   popup =
+                     paste(comuni_bolzano$ï..Comune[which(comuni_bolzano$ï..Comune=="Corvara in Badia")], 
+                               "Permanenza media",
+                               comuni_bolzano$Permanenza_media[which(comuni_bolzano$ï..Comune=="Corvara in Badia")])) %>%
+  addProviderTiles(providers$OpenStreetMap) %>%
+  addCircles(lat=easy[,3], lng=easy[,2], col="blue", fillColor="blue") %>%
+  addCircles(lat=intermediate[,3], lng=intermediate[,2], col="red", fillColor="red") %>%
+  addCircles(lat=advance[,3], lng=advance[,2], col="black", fillColor="black") %>%
+  addCircleMarkers(lat=46.516522,   lng=11.819034,  popup="Sella", col="brown" ) %>%
+  addLegend(position="topleft", colors=c("blue", "red", "black"),
+            labels=c("Semplice","Intermedia","Difficile"), title="Difficoltà piste")
+l
+```
+
+
+Come si può osservare, tutti e tre i comuni godono di una posizione privilegiata sulla Sellaronda, il giro sciistico intorno al grande massiccio del Sella nelle Dolomiti, unico nel suo genere con una molteplicitá di impianti di risalita e discesa, collegati fra di loro in un panorama circondato da punte rocciose, fitti boschi e paesaggi innevati. La prevalenza di piste di bassa/media difficoltà nelle vicinanze fa sì che queste tre località siano scelte da qualsiasi tipo di sciatore, esperto e non, che può godere del paesaggio mozzafiato durante le sue discese.
+
+
+La bellezza del paesaggio unita all'enorme complesso sciistico risulta essere un luogo suggestivo per trascorre la  tipica *settimana bianca*, infatti la permanenza media dei turisti è di 5 giorni. 
+
+
+```{r, warning = FALSE}
+dat_perma_media_comuni[,1]<-as.factor(dat_perma_media_comuni[,1])
+for(i in 2:ncol(dat_perma_media_comuni)){
+  dat_perma_media_comuni[,i]<-as.numeric(dat_perma_media_comuni[,i])
+}
+aaa<-0
+wo<-str_extract_all(dat_perma_media_comuni$ï..Comune[-nrow(dat_perma_media_comuni)], boundary("word"))
+for (i in 1:length(wo)) {  
+  a<-unlist(wo[[i]])
+  a<-a[-1]
+  if (length(a)>1){
+      b<-a[1]
+      for (j in 2:length(a)){
+        b<-paste(b,a[j])
+        aaa[i]<- b
+      } 
+  } else {
+        aaa[i]<-a
+  }
+}
+dat_perma_media_comuni$ï..Comune<-c(aaa, "Totale")
+dat_perma_media_comuni[c(6,26,88),c(1,2)]
+```
+
+
+Osservando inoltre i precedenti 9 anni si nota che il livello di permanenza nella provincia di Bolzano risulta essere sempre più elevato rispetto a Roma, dove la permanenza media è minore di 3 giorni, come mostrato dal grafico successivo.
+
+
+```{r, warning = FALSE}
+dati_RB<-dati_istat_long[which(dati_istat_long$Provincia=="Roma" |
+                                 dati_istat_long$Provincia=="Bolzano Bozen"),]
+dati_RB<-dati_RB[which(dati_RB$Paese_residenza=="Totale"),]
+dati_RB$Anno<-as.Date(dati_RB$Anno)
+
+plot_ly(dati_RB, x = ~Anno, y = ~Permanenza) %>%
+  add_lines(color = ~Provincia, colors = c("dark blue","red"), alpha = 0.2)
+```
+
+
+Ci si è poi chiesto chi sono i turisti che hanno permesso di raggiungere una vetta così alta alla provincia di Bolzano nel Gennaio 2016.
+
+
+Analizzando i dati relativi alle provenienze, dopo un adeguata pulizia;
+
+
+```{r, eval = FALSE}
+#Dataset provenienza
+j<-1
+nam<-0
+for(i in 2:ncol(dat_gennaio_arr_provenienza)){
+  ifelse(is.na(str_match(names(dat_gennaio_arr_provenienza)[i], ".1")),
+         nam[j]<-paste(names(dat_gennaio_arr_provenienza)[i],dat_gennaio_arr_provenienza[1,i]),
+         nam[j]<-paste(names(dat_gennaio_arr_provenienza)[i-1],dat_gennaio_arr_provenienza[1,i]))
+  j=j+1
+}
+dat_gennaio_arr_provenienza[1, 2:15]<-nam
+colnames(dat_gennaio_arr_provenienza)<-dat_gennaio_arr_provenienza[1,]
+dat_gennaio_arr_provenienza<-dat_gennaio_arr_provenienza[-1,]
+
+dat_gennaio_arr_provenienza[,1]<-as.factor(dat_gennaio_arr_provenienza[,1])
+
+
+for(i in 2:ncol(dat_gennaio_arr_provenienza)){
+  dat_gennaio_arr_provenienza[,i]<-as.numeric(dat_gennaio_arr_provenienza[,i])
+}
+```
+
+
+```{r}
+dat_istat[c(51 , 52),c(1,2, 19)]
+```
+
+
+Si è visto che Bolzano deve il suo primato sia alla tradizionale clientela di turisti italiani e tedeschi, sia agli ospiti provenienti dagli altri paesi esteri come la Svizzera e Liechtenstein, l'Austria, e il Benelux (Paesi Bassi, Belgio e Lussemburgo).
+
+
+```{r}
+tra<-(t(dat_gennaio_arr_provenienza[,c(1,2,4,6,8,10,12)]))
+colnames(tra)<-tra[1,]
+tra<-as.data.frame(tra, stringsAsFactors=FALSE)
+tra[,10]<-row.names(tra)
+tra<-tra[-1,]
+for (i in 1:9){
+  tra[,i]<-as.numeric(tra[,i])
+}
+
+som=tra[2,9] + tra[3,9] + tra[4,9] + tra[5,9]
+
+demo <- tribble(
+  ~a,      ~b,
+  tra[2,9]/som*100, tra[2,10], #Germania
+  tra[3,9]/som*100, tra[3,10], #Austria
+  tra[4,9]/som*100, tra[4,10], #Svizzera e Liechtenstein
+  tra[5,9]/som*100, tra[5,10], #Benelux
+  tra[6,9]/som*100, tra[6,10] #Altri Paesi
+)
+
+ggplot(data = demo) +
+  geom_bar(mapping = aes(x = b, y = a), stat = "identity", fill="lightblue") +
+  labs(x = "Turisti", y = "Numero di arrivi") + 
+  theme_classic() +
+  theme(axis.text.y=element_blank(), axis.ticks.y=element_blank()) + 
+  annotate("text", x = 1, y = 39, label = paste(round(tra[6,9]/som*100,0),"%",sep="")) +
+  annotate("text", x = 2, y = 9, label = paste(round(tra[3,9]/som*100,0),"%",sep="")) +
+  annotate("text", x = 3, y = 9, label = paste(round(tra[5,9]/som*100,0),"%",sep="")) +
+  annotate("text", x = 4, y = 87, label = paste(round(tra[2,9]/som*100,0),"%",sep="")) +
+  annotate("text", x = 5, y = 9, label = paste(round(tra[4,9]/som*100,0),"%",sep="")) +
+  theme(plot.background =element_rect(fill="#F8F8FF"))
+```
+
+
+Analizzando la clientela estera viene evidenziato un turismo che proviene maggiormente dalla Germania, niente di inaspettato come viene confermato dalla storia culturale dell'Alto Adige.
+
+
+La domanda successiva è stata quella di controllare quale tipologia di alberghi è stata privilegiata, e quindi dopo una pulizia dei dati raccolti dal sito *astat.provinz.bz.it*:
+
+
+```{r, eval =FALSE}
+#Dataset alloggi
+j<-1
+nam<-0
+for(i in 3:ncol(dat_gennaio_tipoall_provenienza)){
+  ifelse(is.na(str_match(names(dat_gennaio_tipoall_provenienza)[i], ".1")),
+         nam[j]<-paste(names(dat_gennaio_tipoall_provenienza)[i],dat_gennaio_tipoall_provenienza[1,i]),
+         nam[j]<-paste(names(dat_gennaio_tipoall_provenienza)[i-1],dat_gennaio_tipoall_provenienza[1,i]))
+  j=j+1
+}
+dat_gennaio_tipoall_provenienza[1, 3:16]<-nam
+colnames(dat_gennaio_tipoall_provenienza)<-dat_gennaio_tipoall_provenienza[1,]
+dat_gennaio_tipoall_provenienza<-dat_gennaio_tipoall_provenienza[-1,]
+
+dat_gennaio_tipoall_provenienza<-dat_gennaio_tipoall_provenienza[-c(5,10),-1]
+dat_gennaio_tipoall_provenienza[9,1]<-"Totale"
+
+dat_gennaio_tipoall_provenienza[,1]<-as.factor(dat_gennaio_tipoall_provenienza[,1])
+for(i in 2:ncol(dat_gennaio_tipoall_provenienza)){
+  dat_gennaio_tipoall_provenienza[,i]<-as.numeric(dat_gennaio_tipoall_provenienza[,i])
+}
+```
+
+
+Si è tracciato il segunete grafico:
+
+
+```{r}
+tra<-dat_gennaio_tipoall_provenienza[,c(1,2,4,6,8,10,12)]
+tra[,8]<-tra[,2]+tra[,3]+tra[,4]+tra[,5]+tra[,6]+tra[,7]
+
+
+demo <- tribble(
+  ~a,      ~b,
+  tra[1,8]/tra[9,8]*100, as.character(tra[1,1]), #4-5 stelle
+  tra[2,8]/tra[9,8]*100, as.character(tra[2,1]), #3 stelle
+  tra[3,8]/tra[9,8]*100, as.character(tra[3,1]), #1-2 stelle
+  tra[4,8]/tra[9,8]*100, as.character(tra[4,1]), #Residence
+  tra[5,8]/tra[9,8]*100, as.character(tra[5,1]), #Campeggi
+  tra[6,8]/tra[9,8]*100, as.character(tra[6,1]), #Alloggi privati
+  tra[7,8]/tra[9,8]*100, as.character(tra[7,1]), #Esercizi agrituristici
+  tra[8,8]/tra[9,8]*100, as.character(tra[8,1]) #Altri esercizi
+)
+
+ggplot(data = demo) +
+  geom_bar(mapping = aes(x = b, y = a), stat = "identity", fill="lightgreen") +
+  labs(x = "Tipologia Albergo", y = "Numero di arrivi") + 
+  theme_classic() +
+  theme(axis.text.y=element_blank(), axis.ticks.y=element_blank()) + 
+  annotate("text", x = 1, y = 13, label = paste(round(tra[3,8]/tra[9,8]*100,0),"%",sep="")) +
+  annotate("text", x = 2, y = 41, label = paste(round(tra[2,8]/tra[9,8]*100,0),"%",sep="")) +
+  annotate("text", x = 3, y = 27, label = paste(round(tra[1,8]/tra[9,8]*100,0),"%",sep="")) +
+  annotate("text", x = 4, y = 10, label = paste(round(tra[6,8]/tra[9,8]*100,0),"%",sep="")) +
+  annotate("text", x = 5, y = 3, label = paste(round(tra[8,8]/tra[9,8]*100,0),"%",sep="")) +
+  annotate("text", x = 6, y = 3, label = paste(round(tra[5,8]/tra[9,8]*100,0),"%",sep="")) +
+  annotate("text", x = 7, y = 7, label = paste(round(tra[7,8]/tra[9,8]*100,0),"%",sep="")) +
+  annotate("text", x = 8, y = 11, label = paste(round(tra[4,8]/tra[9,8]*100,0),"%",sep="")) + 
+  theme(plot.background =element_rect(fill="#F8F8FF"))
+```
+
+
+Che mostra che i turisti nel 2016 prediligono alberghi a 3 stelle rispetto ad altri tipi di alloggi.
+
+
+##Our Finding
+
+
+Si è quindi scoperto che Bolzano risulta essere la provincia con il più alto numero di arrivi in assoluto nei 9 anni presi in considerazione, battendo Roma, la capitale.
+
+
+La maggior parte dei turisti nella provincia hanno una presenza media di 5 giorni, la tipica *settimana bianca*, essendo Bolzano ricca di paesaggi mozzafiato e caratterizzata dall'enorme comprensorio sciistico del Sellaronda, ma anche da interessantissime attività enogastronomiche come quelle descritte nel blog.
+
+
+##Reference
+
+
+Related Work: Anything that inspired you, such as a paper, a web site, something we discussed in class, etc.
+
+
+Dati:
+
++ http://dati.istat.it/
++ https://astat.provinz.bz.it/it/banche-dati-comunali.asp
+
+Fonti:
+
++ https://argomenti.ilsole24ore.com/parolechiave/arrivi
++ https://www.varesenews.it/2019/01/turismo-invernale-un-business-267-milioni-euro/785799/
++ https://www.legambiente.it/sites/default/files/docs/ecosistema_urbano_2017_dossier.pdf#page48
++ https://berlinocacioepepemagazine.com/il-turismo-in-italia-vive-soprattutto-grazie-ai-tedeschi/
++ http://www.camcom.gov.it/P42A646C4S3/bolzano---molto-buono-il-clima-di-fiducia-nel-settore-turistico-altoatesino.htm
++ http://dateandtime.info/it/citycoordinates.php?id=3181913
++ http://www.dossier.net/utilities/coordinate-geografiche/provincia-bolzano.htm
+
+
+Luoghi:
+
++ https://www.altabadia.org/it/alta-badia-dolomiti.html
++ https://www.alta-badia.net/it/hotel-a-3-stelle-superior-in-alta-badia.asp
++ https://www.valgardenaskimap.com/it/sella-ronda-earthview
++ https://www.bolzanodintorni.info/it/bolzano-cultura/da-non-perdere/oetzi-museo-archeologico-dell-alto-adige.html
+
+Altro:
+
++ https://www.w3schools.com/default.asp
++ http://leaflet-extras.github.io/leaflet-providers/preview/#filter
++ https://www.oreilly.com/library/view/r-for-data/9781491910382/ch01.html
++ https://rstudio.github.io/leaflet/

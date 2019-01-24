@@ -1,0 +1,522 @@
+---
+title: " "
+output:
+  html_document:
+    includes:
+      in_header: Banner1.html
+      before_body: CambioColore.html
+      after_body: Bottom.html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stringr)
+library(tibble)
+library(ggplot2)
+library(maptools)
+library(plotly)
+library(leaflet)
+```
+
+```{r, include= FALSE}
+#Dataset
+dat_istat<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/2000-2018%20per%20tipo%20e%20residenza%20dei%20visitatori.csv",  sep = ";", stringsAsFactors = F)
+dat_gennaio_arr_provenienza<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/gen-16%20arrivi%20e%20presenze%20origine%20clienti.csv", sep = ";", stringsAsFactors = F)
+dat_gennaio_tipoall_provenienza<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/gen-16%20tipologia%20albergo%20origine%20clienti.csv",  sep = ";", stringsAsFactors = F)
+dat_tipoall<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/tipologia%20albergo%20provincia%20bolzano%202016.csv",  sep = ";", stringsAsFactors = F)
+dat_arr_comuni<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/2016%20arrivi%20nei%20comuni.csv",  sep = ";", stringsAsFactors = F)
+dat_perma_media_comuni<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/permanenza%20media%202016%20nei%20comuni.csv",  sep = ";", stringsAsFactors = F)
+dat_comuni_lat_lon<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/Comuni%20lat%20e%20long.csv",  sep = ";", stringsAsFactors = F)
+Provincie <- read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/Provincie%20lat%20e%20long.csv", sep=";", stringsAsFactors = FALSE)
+easy<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/easy.csv")
+intermediate<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/intermediate.csv")
+advance<-read.csv("https://raw.githubusercontent.com/aspataro2/Progetto-SL/master/data/advance.csv")
+```
+
+
+```{r, include=FALSE, warning=FALSE}
+#Pulizia vari dataset
+
+#Pulizia dati istat
+dat_istat<-dat_istat[,-c(1,4,43:16384)]#colonne in più
+
+for(i in 3:40){  #creo nome delle variabili
+  ifelse(dat_istat[1,i]=="", 
+         dat_istat[3,i]<-paste(dat_istat[1,i-1],dat_istat[2,i]),
+         dat_istat[3,i]<-paste(dat_istat[1,i],dat_istat[2,i]))
+}
+dat_istat<-dat_istat[-c(1,2),]
+
+colnames(dat_istat)<-dat_istat[1,] #rinomino variabili
+dat_istat<-dat_istat[-1,] #elimino osservazione con nomi variabili
+
+dat_istat[,1]<-as.factor(dat_istat[,1]) #territorio in factor
+dat_istat[,2]<-as.factor(dat_istat[,2]) #comune in factor
+
+for(i in 3:40){
+  dat_istat[,i]<-as.numeric(dat_istat[,i]) #osservazioni di arrivi e presenze in numeric
+}
+
+#completamento variabile territorio
+dat_istat[1:3,1]<-"Italia"
+for(i in 4:269){
+  if(dat_istat[i,1]==""){
+    dat_istat[i,1]<-dat_istat[i-1,1]
+  }
+}
+
+#elimino dati dal 2000/2007 e il 2018 dato che ci sono solo misurazioni a livello nazionale e non su base provinciale e anche il 2017
+dat_istat<-dat_istat[,-c(3:18, 37:40)]
+
+#elimino regioni
+regioni<-c("Italia","  Piemonte", "  Lombardia","  Sardegna","  Sicilia","  Lombardia","  Toscana","  Marche", "  Molise","  Abruzzo","  Liguria", "  Puglia","  Campania","  Calabria", "  Lazio","  Provincia Autonoma Bolzano / Bozen", "  Provincia Autonoma Trento", "  Trentino Alto Adige / SÃ¼dtirol", "  Veneto", "  Umbria", "  Valle d'Aosta / Vallee d'Aoste", "  Friuli-Venezia Giulia", "  Emilia-Romagna", "  Basilicata")
+regioni<-c(regioni, "    Sud Sardegna") #elimino anche Sud Sardegna, provincia che fino al 2016 non esisteva
+indice_regioni<-0
+k<-1
+for(i in 1:nrow(dat_istat)){
+  for(j in 1:length(regioni)){
+    if((dat_istat$Territorio[i]==regioni[j])){
+      indice_regioni[k]<-i
+      k=k+1
+    }
+  }
+}
+dat_istat<-dat_istat[-indice_regioni,]
+
+#indici utili
+col_arrivi<- c(3,5,7,9,11,13,15,17,19)
+col_presenze<-c(4,6,8,10,12,14,16,18,20)
+
+j<-1
+pari<-0
+for(i in 1:110){
+  pari[j]<-(2*i)
+  j=j+1
+}
+
+j<-1
+dispari<-0
+for(i in 0:109){
+  dispari[j]<-(2*i+1)
+  j=j+1
+}
+
+j<-1
+k<-1
+p<-0
+prov<-0
+for(i in dispari){
+  a<-unlist(str_extract_all(as.character(dat_istat$Territorio[i]), boundary("word")))
+  if(length(a)>1){
+    p<-a[1]
+    for( j in 2:length(a)){
+      p<-paste(p,a[j])
+    }
+  } else {
+    p<-a
+  }
+  prov[k]<-p
+  k=k+1
+}
+
+dat_istat$Territorio<-rep(prov,each=2)
+dat_istat$Territorio<-as.factor(dat_istat$Territorio)
+
+#Creazione dati istat longitudinale
+#Longitudinali Arrivi
+date<-c("2008-01-01", "2009-01-01", "2010-01-01", "2011-01-01", "2012-01-01", "2013-01-01", "2014-01-01", "2015-01-01", "2016-01-01")
+dat_istat_long_arrivi<-data.frame(Provincia=NA, Paese_residenza=NA, Arrivi=NA, Anno=NA)
+r<-1
+j<-1
+k<-1
+
+for(i in pari){
+  dat_istat_long_arrivi[r:(r+26),1]<-rep(as.character(dat_istat[i,1]),27)
+  dat_istat_long_arrivi[r:(r+17),2]<-rep(as.character(dat_istat[1:2,2]), each=9)
+  dat_istat_long_arrivi[(r+18):(r+26),2]<-"Totale"
+  dat_istat_long_arrivi[r:(r+8),3]<-t(dat_istat[j:(j+1),col_arrivi])[1:9]
+  dat_istat_long_arrivi[(r+9):(r+17),3]<-t(dat_istat[j:(j+1),col_arrivi])[10:18]
+  tot<-0
+  l<-1
+  for(k in col_arrivi){
+    tot[l]<-sum(dat_istat[j,k],dat_istat[j+1,k], na.rm=TRUE)
+    l<-l+1
+  }
+  dat_istat_long_arrivi[(r+18):(r+26),3]<-tot
+  dat_istat_long_arrivi[r:(r+26),4]<-rep(date,3)
+  j<-j+2
+  r<-r+27
+}
+
+#Longitudinali Presenze
+dat_istat_long_presenze<-data.frame(Provincia=NA, Paese_residenza=NA, Presenze=NA, Anno=NA)
+r<-1
+j<-1
+k<-1
+
+for(i in pari){
+  dat_istat_long_presenze[r:(r+26),1]<-rep(as.character(dat_istat[i,1]),27)
+  dat_istat_long_presenze[r:(r+17),2]<-rep(as.character(dat_istat[1:2,2]), each=9)
+  dat_istat_long_presenze[(r+18):(r+26),2]<-"Totale"
+  dat_istat_long_presenze[r:(r+8),3]<-t(dat_istat[j:(j+1),col_presenze])[1:9]
+  dat_istat_long_presenze[(r+9):(r+17),3]<-t(dat_istat[j:(j+1),col_presenze])[10:18]
+  tot<-0
+  l<-1
+  for(k in col_presenze){
+    tot[l]<-sum(dat_istat[j,k],dat_istat[j+1,k], na.rm=TRUE)
+    l<-l+1
+  }
+  dat_istat_long_presenze[(r+18):(r+26),3]<-tot
+  dat_istat_long_presenze[r:(r+26),4]<-rep(date,3)
+  j<-j+2
+  r<-r+27
+}
+
+#Dataset provenienza
+j<-1
+nam<-0
+for(i in 2:ncol(dat_gennaio_arr_provenienza)){
+  ifelse(is.na(str_match(names(dat_gennaio_arr_provenienza)[i], ".1")),
+         nam[j]<-paste(names(dat_gennaio_arr_provenienza)[i],dat_gennaio_arr_provenienza[1,i]),
+         nam[j]<-paste(names(dat_gennaio_arr_provenienza)[i-1],dat_gennaio_arr_provenienza[1,i]))
+  j=j+1
+}
+dat_gennaio_arr_provenienza[1, 2:15]<-nam
+colnames(dat_gennaio_arr_provenienza)<-dat_gennaio_arr_provenienza[1,]
+dat_gennaio_arr_provenienza<-dat_gennaio_arr_provenienza[-1,]
+
+dat_gennaio_arr_provenienza[,1]<-as.factor(dat_gennaio_arr_provenienza[,1])
+
+
+for(i in 2:ncol(dat_gennaio_arr_provenienza)){
+  dat_gennaio_arr_provenienza[,i]<-as.numeric(dat_gennaio_arr_provenienza[,i])
+}
+
+#Dataset alloggi
+j<-1
+nam<-0
+for(i in 3:ncol(dat_gennaio_tipoall_provenienza)){
+  ifelse(is.na(str_match(names(dat_gennaio_tipoall_provenienza)[i], ".1")),
+         nam[j]<-paste(names(dat_gennaio_tipoall_provenienza)[i],dat_gennaio_tipoall_provenienza[1,i]),
+         nam[j]<-paste(names(dat_gennaio_tipoall_provenienza)[i-1],dat_gennaio_tipoall_provenienza[1,i]))
+  j=j+1
+}
+dat_gennaio_tipoall_provenienza[1, 3:16]<-nam
+colnames(dat_gennaio_tipoall_provenienza)<-dat_gennaio_tipoall_provenienza[1,]
+dat_gennaio_tipoall_provenienza<-dat_gennaio_tipoall_provenienza[-1,]
+
+dat_gennaio_tipoall_provenienza<-dat_gennaio_tipoall_provenienza[-c(5,10),-1]
+dat_gennaio_tipoall_provenienza[9,1]<-"Totale"
+
+dat_gennaio_tipoall_provenienza[,1]<-as.factor(dat_gennaio_tipoall_provenienza[,1])
+for(i in 2:ncol(dat_gennaio_tipoall_provenienza)){
+  dat_gennaio_tipoall_provenienza[,i]<-as.numeric(dat_gennaio_tipoall_provenienza[,i])
+}
+
+
+#Dataset long arrivi e presenze
+dati_istat_long<-cbind(dat_istat_long_arrivi[,c(1:3)],dat_istat_long_presenze[,c(3,4)])
+
+
+#Codifica variabili e creazione permanenza
+#str(dati_istat_long)
+#dati_istat_long$Anno<-as.numeric(dati_istat_long$Anno)
+dati_istat_long$Permanenza<- dati_istat_long$Presenze/dati_istat_long$Arrivi
+
+
+dati_arrivi<-dati_istat_long[dati_istat_long$Paese_residenza=="Totale",]
+
+dati_arrivi_max<-data.frame(Anno=c(2008:2016), Citta=NA, Arrivo_max=NA)
+ma<-0
+cit<-0
+j<-1
+for(i in date){
+  ma<-max(dati_arrivi$Arrivi[which(dati_arrivi$Anno==i)],na.rm=TRUE)
+  cit<-dati_arrivi$Provincia[which(dati_arrivi$Arrivi==ma)]
+  dati_arrivi_max$Citta[j]<-cit
+  dati_arrivi_max$Arrivo_max[j]<-ma
+  j=j+1
+}
+
+
+#Percentuali arrivi del totale di provincia
+perc<-0
+j<-1
+tot<-sum(dat_istat_long_arrivi$Arrivi[which(dat_istat_long_arrivi$Paese_residenza=="Totale" & dat_istat_long_arrivi$Anno=="2016-01-01")], na.rm=TRUE)
+ind<-which(dat_istat_long_arrivi$Paese_residenza=="Totale" & dat_istat_long_arrivi$Anno=="2016-01-01")
+for(i in ind){
+  perc[j]<-dat_istat_long_arrivi$Arrivi[i]/tot*100
+  j<-j+1
+}
+prov_perc_tot<-data.frame(Provincia=dat_istat$Territorio[pari], Perc_arrivi_tot=perc)
+
+#Lat e long comuni Bolzano
+dat_comuni_lat_lon<-dat_comuni_lat_lon[,1:3]
+dat_comuni_lat_lon[,1]<-as.factor(dat_comuni_lat_lon[,1])
+comuni_bolzano<-cbind(dat_comuni_lat_lon, Permanenza_media=dat_perma_media_comuni$Totale[-which(dat_perma_media_comuni$ï..Comune=="Totale")])
+
+#Lat e long Provincie
+Provincie <- Provincie[,-c(2:6)]
+Provincie[,1]<-as.factor(Provincie$ï..Provincia)
+
+
+mappa<-cbind(dat_istat_long_arrivi[which(dat_istat_long_arrivi$Paese_residenza=="Totale" & dat_istat_long_arrivi$Anno=="2016-01-01"),], Perc_arr_tot=prov_perc_tot[,2])
+
+mappa$soglia<-ifelse(mappa$Perc_arr_tot<1, 0, ifelse (mappa$Perc_arr_tot<9, 1, 2))
+
+for (i in 1:nrow(mappa)){
+  for (j in 1:nrow(Provincie)){
+    if (mappa$Provincia[i]==Provincie$ï..Provincia[j]){
+      mappa$Latitudine[i]<-Provincie$Latitudine[j]
+      mappa$Longitudine[i]<-Provincie$Longitudine[j]
+    }
+  }
+}
+```
+
+```{r}
+
+```
+
+------
+
+
+Il punto di partenza dell'analisi è stato esaminare il turismo in Italia in un particolare periodo dell'anno: il mese di Gennaio. Oltre a essere il primo mese dell'anno, è caratterizzato dal particolare clima freddo, e poichè include alcune festività, come Capodanno e l'Epifania, permette una migliore organizzazione delle vacanze. 
+
+L'Italia ospita città come Firenze, Roma, Milano, Torino, Verona ecc, note come le più belle città d'arte e ogni anno attirano i turisti da ogni parte del mondo. Per cui, l'aspettativa dell'analisi, era trovare quale tra queste grandi città (e provincie) raggiungesse il primato di "città/provincia più visitata". Ma, analizzando i dati acquisiti dal sito [*istat.it*](https://www.istat.it/), che coprono il periodo da Gennaio 2008 a Gennaio 2016, è emerso che la provincia di Bolzano è quella con il maggior numero di turisti, un risultato sorprendente e inaspettato. Per cui, si è cercato di dare una risposta alla domanda *"Perchè Bolzano è più visitata a Gennaio?"* cercando di capire il motivo di tanta attrazione turistica.
+
+
+
+Il turismo viene calcolato in base:
+
+
++ **numero di arrivi**: il numero di clienti che hanno effettuato il check-in negli esercizi ricettivi (alberghieri o extra-alberghieri) nel periodo considerato;
++ **numero di presenze**: il numero delle notti trascorse dai clienti negli esercizi ricettivi nel periodo considerato;
++ **permanenza media**: esprime la durata media della permanenza dei clienti negli esercizi ricettivi e si calcola mediante il rapporto tra il numero di notti trascorse (presenze) e il numero di clienti arrivati nella struttura ricettiva (arrivi).
+
+
+In questi anni la provincia che ha avuto un maggior numero di arrivi è stata Roma, essendo la capitale italiana, ma come mostra il grafico successivo, in due anni distinti Bolzano risulta essere superiore a Roma in termini di arrivi.
+
+```{r, echo=FALSE}
+par(bg="#F8F8FF")
+plot(dati_arrivi_max$Arrivo_max~dati_arrivi_max$Anno,ylim=c(500000,600000),xlab="anni",ylab="Numero massimo di arrivi",type="b",pch=20, col="green", )
+text(dati_arrivi_max$Anno,dati_arrivi_max$Arrivo_max,dati_arrivi_max$Citta, cex=.8,col="dark green")
+```
+
+Si osserva che Bolzano nel 2016 è stata la provincia con il maggior numero di arrivi in assoluto negli ultimi 9 anni;la cui distribuzione percentuale è descritta nella seguente mappa.
+
+```{r, echo=FALSE}
+#mappa italia con provincie gennaio 2016 
+l <- leaflet(height = 750) %>%
+  setView(lat = 42.76698, lng = 12.49382, zoom=6) %>%
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==0)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==0)], 
+                   col="yellow", fillColor = "gray",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==0)], "Percentuale arrivi:",
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==0)],2), "%")) %>% #cerchio colorato
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==1)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==1)], 
+                   col="green", fillColor = "lightgreen",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==1)], "Percentuale arrivi:", 
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==1)],2), "%")) %>%
+  addCircleMarkers(lat = mappa$Latitudine[which(mappa$soglia==2)], 
+                   lng = mappa$Longitudine[which(mappa$soglia==2)], 
+                   col="red", fillColor = "lightblue",  opacity = 0.9, 
+                   popup=paste(mappa$Provincia[which(mappa$soglia==2)], "Percentuale arrivi:", 
+                               round(mappa$Perc_arr_tot[which(mappa$soglia==2)],2), "%")) %>%
+  addProviderTiles(providers$CartoDB.PositronNoLabels) %>%
+  addLegend(position="topright", colors=c("yellow", "green", "red"),
+            labels=c("Bassa (< 1%)", "Intermedia", "Alta (> 10%)"), title="Percentuale arrivi")
+l
+```
+
+Il mese invernale preso in condisiderazione contribuisce ad una maggiore affluenza nell'Italia Settentrionale. 
+
+
+Il maggior numero di arrivi si concentra nelle provincie con città turistiche, come ad esempio Firenze, Torino e Venezia superate dalle provincie di Milano e di Trento. Tra tutte, le due provincie che spiccano sono Roma e Bolzano, le quali hanno una percentuale di arrivi superiore al 10% ciascuna. In questo anno Bolzano si guadagna la vetta con uno scarto dello 0,3%.
+
+
+------
+
+#####**Cerchiamo di capire perchè Bolzano è una meta turistica così ambita nel mese di Gennaio.**
+
+Bolzano è una provincia autonoma italiana situata in Trentino-Alto Adige/Südtirol, conta 529824 abitanti e ha una superficie di 7.400 $km^2$, il capoluogo di provincia è l'omonima città ed è composta da 116 comuni suddivisi in 8 comunità comprensoriali.
+
+
+Le attività principali della provincia di Bolzano sono tutte correlate al turismo che è la principale fonte di sostentamento per gli abitanti. Il punto di forza è l'elevata qualità dell'offerta alberghiera, gastronomica e dei servizi: ristoranti di lusso, pasticcerie, vita notturna, negozi alla moda e centri noleggio che offrono servizi di prima classe. Il turismo invernale, ha inoltre fatto nascere molteplici servizi ricettivi, come alberghi, ristoranti, negozi, impianti di risalita e rifugi.
+
+
+La provincia è situata in una valle al centro di colline ricche di vigneti ed è la porta verso la catena montuosa delle Dolomiti, considerate patrimonio dell'UNESCO. 
+In particolare, le valli della provincia di Bolzano (Val d'Adige, Valle Isarco, Val Pusteria, Val Venosta) basano la propria economia sulla pratica invernale dello sci alpino. 
+
+
+La provincia di Bolzano fa parte del comprensorio sciistico "Dolomiti Superski" che comprende un totale di 1200 km di piste divise in 12 zone sciistiche. Offre 450 impianti di risalita, di cui circa la metà direttamente collegati tra di loro.
+
+
+Corvara, Badia, Selva Val Gardena, che formano il comprensorio dell'Alta Badia, risultano i comuni più visitati della provincia di Bolzano nel periodo invernale, ossia le più pregiate località sciistiche della Valle.
+
+```{r, echo=FALSE}
+l <- leaflet(height = 750) %>%
+  setView(lat = 46.550925,  lng = 11.828666, zoom=12) %>%
+  addCircleMarkers(lat = comuni_bolzano$Latitudine[which(comuni_bolzano$ï..Comune=="Badia")], 
+                   lng = comuni_bolzano$Longitudine[which(comuni_bolzano$ï..Comune=="Badia")], 
+                   col = "darkblue",  opacity = 0.9, 
+                   popup=paste(comuni_bolzano$ï..Comune[which(comuni_bolzano$ï..Comune=="Badia")], 
+                               "Permanenza media",
+                               comuni_bolzano$Permanenza_media[which(comuni_bolzano$ï..Comune=="Badia")])) %>%
+  addCircleMarkers(lat = comuni_bolzano$Latitudine[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")], 
+                   lng = comuni_bolzano$Longitudine[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")], 
+                   col = "darkblue",  opacity = 0.9, 
+                   popup=paste(comuni_bolzano$ï..Comune[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")], 
+                               "Permanenza media",
+                               comuni_bolzano$Permanenza_media[which(comuni_bolzano$ï..Comune=="Selva di Val Gardena")])) %>%
+  addCircleMarkers(lat = comuni_bolzano$Latitudine[which(comuni_bolzano$ï..Comune=="Corvara in Badia")], 
+                   lng = comuni_bolzano$Longitudine[which(comuni_bolzano$ï..Comune=="Corvara in Badia")], 
+                   col = "darkblue",  opacity = 0.9, 
+                   popup=paste(comuni_bolzano$ï..Comune[which(comuni_bolzano$ï..Comune=="Corvara in Badia")], 
+                               "Permanenza media",
+                               comuni_bolzano$Permanenza_media[which(comuni_bolzano$ï..Comune=="Corvara in Badia")])) %>%
+  addProviderTiles(providers$OpenStreetMap) %>%
+  addCircles(lat=easy[,3], lng=easy[,2], col="blue", fillColor="blue") %>%
+  addCircles(lat=intermediate[,3], lng=intermediate[,2], col="red", fillColor="red") %>%
+  addCircles(lat=advance[,3], lng=advance[,2], col="black", fillColor="black") %>%
+  addCircleMarkers(lat=46.516522,   lng=11.819034,  popup="Sella", col="brown" ) %>%
+  addLegend(position="topleft", colors=c("blue", "red", "black"),
+            labels=c("Semplice","Intermedia","Difficile"), title="Difficoltà piste")
+
+l
+```
+
+Come si può osservare, tutti e tre i comuni godono di una posizione privilegiata sulla Sellaronda, il giro sciistico intorno al grande massiccio del Sella nelle Dolomiti, unico nel suo genere con una molteplicitá di impianti di risalita e discesa, collegati fra di loro in un panorama circondato da punte rocciose, fitti boschi e paesaggi innevati. La prevalenza di piste di bassa/media difficoltà nelle vicinanze fa sì che queste tre località siano scelte da qualsiasi tipo di sciatore, esperto e non, che può godere del paesaggio mozzafiato durante le sue discese.
+
+
+La bellezza del paesaggio unita all'enorme complesso sciistico risulta essere un luogo suggestivo per trascorre la  tipica *settimana bianca*, infatti la permanenza media dei turisti, ogni anno, è di 5 giorni. 
+
+
+Osservando i precedenti 9 anni si nota che il livello di permanenza della provincia di Bolzano risulta essere sempre più elevato rispetto a Roma, dove la permanenza media è minore di 3 giorni.
+
+
+Un'altra delle possibili motivazioni riguardanti l'elevata permanenza media nella provincia di Bolzano, può essere imputata al fatto che gli alberghi delle località sciistiche della provincia non consentono la prenotazione per un numero di notti inferiori a 2.
+
+```{r,warning=FALSE,message=FALSE,echo=FALSE}
+dati_RB<-dati_istat_long[which(dati_istat_long$Provincia=="Roma" | dati_istat_long$Provincia=="Bolzano Bozen"),]
+dati_RB<-dati_RB[which(dati_RB$Paese_residenza=="Totale"),]
+dati_RB$Anno<-as.Date(dati_RB$Anno)
+
+plot_ly(dati_RB, x = ~Anno, y = ~Permanenza) %>%
+  add_lines(color = ~Provincia, colors = c("dark blue","red"), alpha = 0.2)
+```
+
+Si nota comunque una decrescita del livello di permanenza nella provincia di Bolzano negli ultimi anni, imputabile ad esempio alla crisi economica, come una delle possibili cause di riduzione della durata della settimana bianca.
+
+-----
+
+#####**Chi ha permesso di raggiungere la vetta a Bolzano nel Gennaio 2016?**
+
+Bolzano deve il suo primato sia alla tradizionale clientela di turisti italiani e tedeschi, sia agli ospiti provenienti dagli altri paesi esteri come la Svizzera e Liechtenstein, l'Austria, e il Benelux (Paesi Bassi, Belgio e Lussemburgo).
+
+```{r, echo=FALSE, warning=FALSE}
+tra<-(t(dat_gennaio_arr_provenienza[,c(1,2,4,6,8,10,12)]))
+colnames(tra)<-tra[1,]
+tra<-as.data.frame(tra, stringsAsFactors=FALSE)
+tra[,10]<-row.names(tra)
+tra<-tra[-1,]
+for (i in 1:9){
+  tra[,i]<-as.numeric(tra[,i])
+}
+
+som=tra[2,9] + tra[3,9] + tra[4,9] + tra[5,9] + tra[6,9]
+
+demo <- tribble(
+  ~a,      ~b,
+  tra[2,9]/som*100, tra[2,10], #Germania
+  tra[3,9]/som*100, tra[3,10], #Austria
+  tra[4,9]/som*100, tra[4,10], #Svizzera e Liechtenstein
+  tra[5,9]/som*100, tra[5,10], #Benelux
+  tra[6,9]/som*100, tra[6,10]  #Altri Paesi
+)
+
+ggplot(data = demo) +
+  geom_bar(mapping = aes(x = b, y = a), stat = "identity", fill="lightblue") +
+  labs(x = "Turisti", y = "Numero di arrivi") + 
+  theme_classic() +
+  theme(axis.text.y=element_blank(), axis.ticks.y=element_blank()) + 
+  annotate("text", x = 1, y = 29, label = paste(round(tra[6,9]/som*100,1),"%",sep="")) +
+  annotate("text", x = 2, y = 9, label = paste(round(tra[3,9]/som*100,1),"%",sep="")) +
+  annotate("text", x = 3, y = 9, label = paste(round(tra[5,9]/som*100,1),"%",sep="")) +
+  annotate("text", x = 4, y = 67, label = paste(round(tra[2,9]/som*100,1),"%",sep="")) +
+  annotate("text", x = 5, y = 9, label = paste(round(tra[4,9]/som*100,1),"%",sep=""))+theme(plot.background =element_rect(fill="#F8F8FF"))
+```
+
+
+Analizzando la clientela estera viene evidenziato un turismo che proviene maggiormente dalla Germania.
+
+
+Questo viene confermato dalla storia culturale dell'Alto Adige, dato che fino al 1919 faceva parte dell'Austria e la sua popolazione era quasi al 100% di madrelingua tedesca. Dopo la Prima Guerra Mondiale, l'Italia, che era uscita dalla guerra dalla parte dei vincitori, ricevette il territorio del Sudtirolo dall'Austria che invece aveva perso la guerra. Questo spiega il "**bilinguismo**" (tedesco e italiano) della provincia di Bolzano.
+
+
+Nel 1922 quando Mussolini arrivò al potere: l'Alto Adige fu "italianizzato". Forse per questa ragione, gli albergatori prediligono maggiormente ospitare clienti tedeschi, o che parlano la lingua tedesca, rispetto agli italiani.
+
+
+Il grafico sottostante mostra dove preferiscono alloggiare i turisti nel 2016. Essi prediligono alberghi a 3 stelle rispetto ad altri tipi di alloggi.
+
+```{r,echo=FALSE,warning=FALSE}
+tra<-dat_gennaio_tipoall_provenienza[,c(1,2,4,6,8,10,12)]
+tra[,8]<-tra[,2]+tra[,3]+tra[,4]+tra[,5]+tra[,6]+tra[,7]
+
+
+demo <- tribble(
+  ~a,      ~b,
+  tra[1,8]/tra[9,8]*100, as.character(tra[1,1]), #4-5 stelle
+  tra[2,8]/tra[9,8]*100, as.character(tra[2,1]), #3 stelle
+  tra[3,8]/tra[9,8]*100, as.character(tra[3,1]), #1-2 stelle
+  tra[4,8]/tra[9,8]*100, as.character(tra[4,1]), #Residence
+  tra[5,8]/tra[9,8]*100, as.character(tra[5,1]), #Campeggi
+  tra[6,8]/tra[9,8]*100, as.character(tra[6,1]), #Alloggi privati
+  tra[7,8]/tra[9,8]*100, as.character(tra[7,1]), #Esercizi agrituristici
+  tra[8,8]/tra[9,8]*100, as.character(tra[8,1]) #Altri esercizi
+)
+
+ggplot(data = demo) +
+  geom_bar(mapping = aes(x = b, y = a), stat = "identity", fill="lightgreen") +
+  labs(x = "Tipologia Albergo", y = "Numero di arrivi") + 
+  theme_classic() +
+  theme(axis.text.y=element_blank(), axis.ticks.y=element_blank()) + 
+  annotate("text", x = 1, y = 13, label = paste(round(tra[3,8]/tra[9,8]*100,1),"%",sep="")) +
+  annotate("text", x = 2, y = 41, label = paste(round(tra[2,8]/tra[9,8]*100,1),"%",sep="")) +
+  annotate("text", x = 3, y = 27, label = paste(round(tra[1,8]/tra[9,8]*100,1),"%",sep="")) +
+  annotate("text", x = 4, y = 10, label = paste(round(tra[6,8]/tra[9,8]*100,1),"%",sep="")) +
+  annotate("text", x = 5, y = 3, label = paste(round(tra[8,8]/tra[9,8]*100,1),"%",sep="")) +
+  annotate("text", x = 6, y = 3, label = paste(round(tra[5,8]/tra[9,8]*100,1),"%",sep="")) +
+  annotate("text", x = 7, y = 7, label = paste(round(tra[7,8]/tra[9,8]*100,1),"%",sep="")) +
+  annotate("text", x = 8, y = 11, label = paste(round(tra[4,8]/tra[9,8]*100,0),"%",sep="")) + 
+  theme(plot.background =element_rect(fill="#F8F8FF"))
+```
+
+La scelta può essere stata influenzata dal fatto che gli ospiti preferiscono una permanenza maggiore rispetto ad una qualità alberghiera superiore. Un albergo a 3 stelle garantisce un trade-off prezzo-qualità più che soddisfacente.
+
+----
+
+#####**Il successo di Bolzano è stato improvviso o costruito nel tempo?**
+
+
+L'attentato al Bataclan di Parigi nel Novembre 2015 potrebbe avere influenzato il turismo internazionale nei mesi successivi, portando i turisti a non scegliere una grande città come meta per le loro vacanze, infatti Roma registra un minor numero di arrivi proprio nel Gennaio 2016.
+
+
+Questo può aver in parte influenzato il fatto che Bolzano abbia superato Roma dopo il suo primato di 4 anni, ma la motivazione principale per cui Bolzano abbia attratto un così grande numero di turisti, va ricercata soprattutto nelle iniziative proprie della provincia. Infatti, come emerge dal Barometro dell'economia dell'IRE - Istituto di ricerca economica della camera di commercio di Bolzano, oltre nove imprese su dieci contano di conseguire un risultato d'esercizio soddisfacente. Vi è ottimismo soprattutto per alberghi e ristoranti, mentre tra i gestori di bar e caffè il clima è più modesto.
+
+
+
+Ciò porta a sostenere che gli investimenti nella qualità delle strutture ricettive e dell'offerta turistica, nonchè il crescente utilizzo di prodotti locali hanno reso l'Alto-Adige una destinazione turistica apprezzata e in grado di soddisfare una clientela sempre più esigente. 
+
+
+Esistono diverse iniziative che consentono di attirare in quota numerosi turisti. 
+Due eventi di particolare rilevanza sono:
+
+- [**"Sommelier on the slope"**](https://www.altabadia.org/it/vacanze-dolomiti/mangiare-e-bere/sommelier-in-pista.html): 
+
+La combinazione tra le perfette piste dell'Alta Badia e il panorama maestoso delle Dolomiti, rende indimenticabili le giornate sugli sci arricchendole tra l'altro con deliziose esperienze enogastronimiche. Con questa iniziativa l'Alta Badia offre l'opportunità di conoscere i migliori vini dell'Alto Adige direttamente in pista.
+
+- [**"Sciare con gusto"**](https://www.altabadia.org/it/vacanze-dolomiti/mangiare-e-bere/sciare-con-gusto.html):
+
+L'Alta Badia è apprezzata come meta d'eccellenza degli amanti dello sci e della buona cucina. Questo grazie alla vastità ed alla centralità del comprensorio sciistico con accesso diretto ad alcuni dei giri sciistici più famosi delle Alpi come la *Sellaronda*, già citata prima, e il "*Giro Sciistico della Grande Guerra*" ma anche grazie ai paesaggi mozzafiato delle Dolomiti, e soprattutto all'ospitalità dei suoi abitanti e alla passione per la buona cucina che si avverte in tutta la valle, infatti brillano ben [sei stelle Michelin](https://www.altabadia.org/it/vacanze-dolomiti/mangiare-e-bere/una-valle-sei-stelle-michelin.html). 
